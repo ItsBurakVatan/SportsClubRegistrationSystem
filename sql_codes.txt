@@ -1,0 +1,669 @@
+-- Kullanıcılar tablosu (admin paneli için)
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(20) DEFAULT 'admin',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Başvurular tablosu (ana tablo)
+CREATE TABLE applications (
+    id SERIAL PRIMARY KEY,
+    application_number VARCHAR(20) UNIQUE NOT NULL,
+    status VARCHAR(20) DEFAULT 'draft', -- draft, submitted, approved, rejected
+    legal_structure VARCHAR(50),
+    club_type VARCHAR(50),
+    club_name VARCHAR(200),
+    club_abbreviation VARCHAR(50),
+    assembly_interval VARCHAR(20),
+    assembly_month VARCHAR(20),
+    phone1 VARCHAR(20),
+    phone2 VARCHAR(20),
+    public_institution BOOLEAN DEFAULT FALSE,
+    public_institution_type VARCHAR(50),
+    institution_name VARCHAR(200),
+    province VARCHAR(50),
+    district VARCHAR(50),
+    full_address TEXT,
+    club_colors JSONB, -- Renk bilgileri JSON formatında
+    club_emblem_url VARCHAR(500),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Kurucu üyeler tablosu
+CREATE TABLE founders (
+    id SERIAL PRIMARY KEY,
+    application_id INTEGER REFERENCES applications(id) ON DELETE CASCADE,
+    tc_no VARCHAR(11),
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    birth_date DATE,
+    phone VARCHAR(20),
+    email VARCHAR(100),
+    occupation VARCHAR(50),
+    education VARCHAR(50),
+    is_temporary_president BOOLEAN DEFAULT FALSE,
+    is_correspondence_authority BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Yüklenen belgeler tablosu
+CREATE TABLE documents (
+    id SERIAL PRIMARY KEY,
+    application_id INTEGER REFERENCES applications(id) ON DELETE CASCADE,
+    document_type VARCHAR(50) NOT NULL, -- tuzuk, kurulus-bildirimi, logo-ayirici-isaret, diger
+    original_filename VARCHAR(255) NOT NULL,
+    stored_filename VARCHAR(255) NOT NULL,
+    file_path VARCHAR(500) NOT NULL,
+    file_size INTEGER,
+    mime_type VARCHAR(100),
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Başvuru geçmişi tablosu (audit log)
+CREATE TABLE application_history (
+    id SERIAL PRIMARY KEY,
+    application_id INTEGER REFERENCES applications(id) ON DELETE CASCADE,
+    action VARCHAR(50) NOT NULL, -- created, updated, submitted, approved, rejected
+    description TEXT,
+    performed_by INTEGER REFERENCES users(id),
+    performed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE provinces (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) NOT NULL,
+    plate_number INTEGER UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- İlçeler tablosu
+CREATE TABLE districts (
+    id SERIAL PRIMARY KEY,
+    province_id INTEGER REFERENCES provinces(id) ON DELETE CASCADE,
+    name VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE colors (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) NOT NULL UNIQUE,
+    hex_code VARCHAR(7) NOT NULL,
+    display_name VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+
+
+-- Performans için gerekli indeksler
+CREATE INDEX idx_applications_status ON applications(status);
+CREATE INDEX idx_applications_created_at ON applications(created_at);
+CREATE INDEX idx_founders_application_id ON founders(application_id);
+CREATE INDEX idx_founders_tc_no ON founders(tc_no);
+CREATE INDEX idx_documents_application_id ON documents(application_id);
+CREATE INDEX idx_documents_type ON documents(document_type);
+CREATE INDEX idx_application_history_application_id ON application_history(application_id);
+CREATE INDEX idx_districts_province_id ON districts(province_id);
+CREATE INDEX idx_colors_name ON colors(name);
+
+
+
+-- updated_at alanını otomatik güncellemek için trigger fonksiyonu
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Trigger'ları oluştur
+CREATE TRIGGER update_applications_updated_at BEFORE UPDATE ON applications
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_founders_updated_at BEFORE UPDATE ON founders
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+
+CREATE TRIGGER update_colors_updated_at BEFORE UPDATE ON colors
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+
+-- Otomatik başvuru numarası oluşturan fonksiyon
+CREATE OR REPLACE FUNCTION generate_application_number()
+RETURNS TRIGGER AS $$
+DECLARE
+    year_part VARCHAR(4);
+    sequence_part VARCHAR(6);
+BEGIN
+    year_part := EXTRACT(YEAR FROM CURRENT_DATE)::VARCHAR;
+    sequence_part := LPAD(NEW.id::VARCHAR, 6, '0');
+    NEW.application_number := 'SKB-' || year_part || '-' || sequence_part;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger'ı oluştur
+CREATE TRIGGER set_application_number BEFORE INSERT ON applications
+    FOR EACH ROW EXECUTE FUNCTION generate_application_number();
+
+
+
+
+
+
+-- İlleri ekle (81 il)
+INSERT INTO provinces (name, plate_number) VALUES
+('ADANA', 1), ('ADIYAMAN', 2), ('AFYONKARAHİSAR', 3), ('AĞRI', 4), ('AMASYA', 5),
+('ANKARA', 6), ('ANTALYA', 7), ('ARTVİN', 8), ('AYDIN', 9), ('BALIKESİR', 10),
+('BİLECİK', 11), ('BİNGÖL', 12), ('BİTLİS', 13), ('BOLU', 14), ('BURDUR', 15),
+('BURSA', 16), ('ÇANAKKALE', 17), ('ÇANKIRI', 18), ('ÇORUM', 19), ('DENİZLİ', 20),
+('DİYARBAKIR', 21), ('EDİRNE', 22), ('ELAZIĞ', 23), ('ERZİNCAN', 24), ('ERZURUM', 25),
+('ESKİŞEHİR', 26), ('GAZİANTEP', 27), ('GİRESUN', 28), ('GÜMÜŞHANE', 29), ('HAKKARİ', 30),
+('HATAY', 31), ('ISPARTA', 32), ('MERSİN', 33), ('İSTANBUL', 34), ('İZMİR', 35),
+('KARS', 36), ('KASTAMONU', 37), ('KAYSERİ', 38), ('KIRKLARELİ', 39), ('KIRŞEHİR', 40),
+('KOCAELİ', 41), ('KONYA', 42), ('KÜTAHYA', 43), ('MALATYA', 44), ('MANİSA', 45),
+('KAHRAMANMARAŞ', 46), ('MARDİN', 47), ('MUĞLA', 48), ('MUŞ', 49), ('NEVŞEHİR', 50),
+('NİĞDE', 51), ('ORDU', 52), ('RİZE', 53), ('SAKARYA', 54), ('SAMSUN', 55),
+('SİİRT', 56), ('SİNOP', 57), ('SİVAS', 58), ('TEKİRDAĞ', 59), ('TOKAT', 60),
+('TRABZON', 61), ('TUNCELİ', 62), ('ŞANLIURFA', 63), ('UŞAK', 64), ('VAN', 65),
+('YOZGAT', 66), ('ZONGULDAK', 67), ('AKSARAY', 68), ('BAYBRT', 69), ('KARAMAN', 70),
+('KIRIKKALE', 71), ('BATMAN', 72), ('ŞIRNAK', 73), ('BARTIN', 74), ('ARDAHAN', 75),
+('IĞDIR', 76), ('YALOVA', 77), ('KARABÜK', 78), ('KİLİS', 79), ('OSMANİYE', 80),
+('DÜZCE', 81);
+
+-- İlçeleri ekle (Tüm Türkiye)
+-- ADANA (1)
+INSERT INTO districts (province_id, name) VALUES
+(1, 'ALADAĞ'), (1, 'CEYHAN'), (1, 'ÇUKUROVA'), (1, 'FEKE'), (1, 'İMAMOĞLU'),
+(1, 'KARAİSALI'), (1, 'KARATAŞ'), (1, 'KOZAN'), (1, 'POZANTI'), (1, 'SAİMBEYLİ'),
+(1, 'SARIÇAM'), (1, 'SEYHAN'), (1, 'TUFANBEYLİ'), (1, 'YUMURTALIK'), (1, 'YÜREĞİR');
+
+-- ADIYAMAN (2)
+INSERT INTO districts (province_id, name) VALUES
+(2, 'BESNİ'), (2, 'ÇELİKHAN'), (2, 'GERGER'), (2, 'GÖLBAŞI'), (2, 'KAHTA'),
+(2, 'MERKEZ'), (2, 'SAMSAT'), (2, 'SİNCİK'), (2, 'TUT');
+
+-- AFYONKARAHİSAR (3)
+INSERT INTO districts (province_id, name) VALUES
+(3, 'BAŞMAKÇI'), (3, 'BAYAT'), (3, 'BOLVADİN'), (3, 'ÇAY'), (3, 'ÇOBANLAR'),
+(3, 'DAZKIRI'), (3, 'DİNAR'), (3, 'EMİRDAĞ'), (3, 'EVCİLER'), (3, 'HOCALAR'),
+(3, 'İHSANİYE'), (3, 'İSCEHİSAR'), (3, 'KIZILÖREN'), (3, 'MERKEZ'), (3, 'SANDIKLI'),
+(3, 'SİNANPAŞA'), (3, 'SULTANDAĞI'), (3, 'ŞUHUT');
+
+-- AĞRI (4)
+INSERT INTO districts (province_id, name) VALUES
+(4, 'DİYADİN'), (4, 'DOĞUBAYAZIT'), (4, 'ELEŞKİRT'), (4, 'HAMUR'), (4, 'MERKEZ'),
+(4, 'PATNOS'), (4, 'TAŞLIÇAY'), (4, 'TUTAK');
+
+-- AMASYA (5)
+INSERT INTO districts (province_id, name) VALUES
+(5, 'GÖYNÜCEK'), (5, 'GÜMÜŞHACIKÖY'), (5, 'HAMAMÖZÜ'), (5, 'MERKEZ'), (5, 'MERZİFON'),
+(5, 'SULUOVA'), (5, 'TAŞOVA');
+
+-- ANKARA (6)
+INSERT INTO districts (province_id, name) VALUES
+(6, 'AKYURT'), (6, 'ALTINDAĞ'), (6, 'AYAŞ'), (6, 'BALA'), (6, 'BEYPAZARI'),
+(6, 'ÇAMLIDERE'), (6, 'ÇANKAYA'), (6, 'ÇUBUK'), (6, 'ELMADAĞ'), (6, 'ETİMESGUT'),
+(6, 'EVREN'), (6, 'GÖLBAŞI'), (6, 'GÜDÜL'), (6, 'HAYMANA'), (6, 'KAZAN'),
+(6, 'KEÇİÖREN'), (6, 'KIZILCAHAMAM'), (6, 'MAMAK'), (6, 'NALLIHAN'), (6, 'POLATLI'),
+(6, 'PURSAKLAR'), (6, 'SİNCAN'), (6, 'ŞEREFLİKOÇHİSAR'), (6, 'YENİMAHALLE');
+
+-- ANTALYA (7)
+INSERT INTO districts (province_id, name) VALUES
+(7, 'AKSEKİ'), (7, 'AKSU'), (7, 'ALANYA'), (7, 'DEMRE'), (7, 'DÖŞEMEALTI'),
+(7, 'ELMALI'), (7, 'FİNİKE'), (7, 'GAZİPAŞA'), (7, 'GÜNDOĞMUŞ'), (7, 'İBRADI'),
+(7, 'KAŞ'), (7, 'KEMER'), (7, 'KEPEZ'), (7, 'KORKUTELİ'), (7, 'KUMLUCA'),
+(7, 'MANAVGAT'), (7, 'MURATPAŞA'), (7, 'SERİK');
+
+-- ARTVİN (8)
+INSERT INTO districts (province_id, name) VALUES
+(8, 'ARDANUÇ'), (8, 'ARHAVİ'), (8, 'BORÇKA'), (8, 'HOPA'), (8, 'KEMALPAŞA'),
+(8, 'MERKEZ'), (8, 'MURGUL'), (8, 'ŞAVŞAT'), (8, 'YUSUFELİ');
+
+-- AYDIN (9)
+INSERT INTO districts (province_id, name) VALUES
+(9, 'BOZDOĞAN'), (9, 'BUHARKENT'), (9, 'ÇİNE'), (9, 'DİDİM'), (9, 'EFELER'),
+(9, 'GERMENCİK'), (9, 'İNCİRLİOVA'), (9, 'KARACASU'), (9, 'KARPUZLU'), (9, 'KOÇARLI'),
+(9, 'KÖŞK'), (9, 'KUŞADASI'), (9, 'KUYUCAK'), (9, 'NAZİLLİ'), (9, 'SÖKE'),
+(9, 'SULTANHİSAR'), (9, 'YENİPAZAR');
+
+-- BALIKESİR (10)
+INSERT INTO districts (province_id, name) VALUES
+(10, 'ALTIEYLÜL'), (10, 'AYVALIK'), (10, 'BALYA'), (10, 'BANDIRMA'), (10, 'BİGADİÇ'),
+(10, 'BURHANİYE'), (10, 'DURSUNBEY'), (10, 'EDREMİT'), (10, 'ERDEK'), (10, 'GÖNEN'),
+(10, 'HAVRAN'), (10, 'İVRİNDİ'), (10, 'KEPSUT'), (10, 'MANYAS'), (10, 'SAVAŞTEPE'),
+(10, 'SINDIRGI'), (10, 'GÖMEÇ'), (10, 'SUSURLUK'), (10, 'MARMARA');
+
+-- BİLECİK (11)
+INSERT INTO districts (province_id, name) VALUES
+(11, 'BOZÜYÜK'), (11, 'GÖLPAZARI'), (11, 'MERKEZ'), (11, 'OSMANELİ'), (11, 'PAZARYERİ'),
+(11, 'SÖĞÜT'), (11, 'YENİPAZAR'), (11, 'İNHİSAR');
+
+-- BİNGÖL (12)
+INSERT INTO districts (province_id, name) VALUES
+(12, 'GENÇ'), (12, 'KARLIOVA'), (12, 'KİĞI'), (12, 'MERKEZ'), (12, 'SOLHAN'),
+(12, 'ADAKLI'), (12, 'YAYLADERE'), (12, 'YEDİSU');
+
+-- BİTLİS (13)
+INSERT INTO districts (province_id, name) VALUES
+(13, 'ADİLCEVAZ'), (13, 'AHLAT'), (13, 'HİZAN'), (13, 'MERKEZ'), (13, 'MUTKİ'),
+(13, 'TATVAN'), (13, 'GÜROYMAK');
+
+-- BOLU (14)
+INSERT INTO districts (province_id, name) VALUES
+(14, 'GEREDE'), (14, 'GÖYNÜK'), (14, 'KIBRISCIK'), (14, 'MENGEN'), (14, 'MERKEZ'),
+(14, 'MUDURNU'), (14, 'SEBEN'), (14, 'DÖRTDİVAN'), (14, 'YENİÇAĞA');
+
+-- BURDUR (15)
+INSERT INTO districts (province_id, name) VALUES
+(15, 'AĞLASUN'), (15, 'BUCAK'), (15, 'GÖLHİSAR'), (15, 'TEFENNİ'), (15, 'YEŞİLOVA'),
+(15, 'MERKEZ'), (15, 'ALTINYAYLA'), (15, 'ÇAVDIR'), (15, 'ÇELTİKÇİ'), (15, 'KEMER');
+
+-- BURSA (16)
+INSERT INTO districts (province_id, name) VALUES
+(16, 'BÜYÜKORHAN'), (16, 'GEMLİK'), (16, 'İZNİK'), (16, 'KARACABEY'), (16, 'KELES'),
+(16, 'MUDANYA'), (16, 'MUSTAFAKEMALPAŞA'), (16, 'ORHANELİ'), (16, 'ORHANGAZİ'), (16, 'YENİŞEHİR'),
+(16, 'GÜRSU'), (16, 'HARMANCIK'), (16, 'İNEGÖL'), (16, 'KESTEL'), (16, 'NİLÜFER'),
+(16, 'OSMANGAZİ'), (16, 'YILDIRIM');
+
+-- ÇANAKKALE (17)
+INSERT INTO districts (province_id, name) VALUES
+(17, 'AYVACIK'), (17, 'BAYRAMİÇ'), (17, 'BİGA'), (17, 'BOZCAADA'), (17, 'ÇAN'),
+(17, 'ECEABAT'), (17, 'EZİNE'), (17, 'GELİBOLU'), (17, 'GÖKÇEADA'), (17, 'LAPSEKİ'),
+(17, 'MERKEZ'), (17, 'YENİCE');
+
+-- ÇANKIRI (18)
+INSERT INTO districts (province_id, name) VALUES
+(18, 'ÇERKEŞ'), (18, 'ELDİVAN'), (18, 'ILGAZ'), (18, 'KURŞUNLU'), (18, 'MERKEZ'),
+(18, 'ORTA'), (18, 'ŞABANÖZÜ'), (18, 'YAPRAKLI'), (18, 'ATKARACALAR'), (18, 'KIZILIRMAK'),
+(18, 'BAYRAMÖREN'), (18, 'KORGUN');
+
+-- ÇORUM (19)
+INSERT INTO districts (province_id, name) VALUES
+(19, 'ALACA'), (19, 'BAYAT'), (19, 'İSKİLİP'), (19, 'KARGI'), (19, 'MERKEZ'),
+(19, 'ORTA'), (19, 'OSMANCIK'), (19, 'SUNGURLU'), (19, 'BOĞAZKALE'), (19, 'UĞURLUDAĞ'),
+(19, 'DODURGA'), (19, 'LAÇİN'), (19, 'OĞUZLAR');
+
+-- DENİZLİ (20)
+INSERT INTO districts (province_id, name) VALUES
+(20, 'ACIPAYAM'), (20, 'BULDAN'), (20, 'ÇAL'), (20, 'ÇAMELİ'), (20, 'ÇARDAK'),
+(20, 'ÇİVRİL'), (20, 'GÜNEY'), (20, 'KALE'), (20, 'MERKEZEFENDİ'), (20, 'SARAYKÖY'),
+(20, 'TAVAS'), (20, 'BOZKURT'), (20, 'HONAZ'), (20, 'SERİNHİSAR'), (20, 'PAMUKKALE'),
+(20, 'BAKLAN'), (20, 'BEYAĞAÇ'), (20, 'BOZKURT');
+
+-- DİYARBAKIR (21)
+INSERT INTO districts (province_id, name) VALUES
+(21, 'BİSMİL'), (21, 'ÇERMİK'), (21, 'ÇINAR'), (21, 'ÇÜNGÜŞ'), (21, 'DİCLE'),
+(21, 'ERGANİ'), (21, 'HANİ'), (21, 'HAZRO'), (21, 'KULP'), (21, 'LİCE'),
+(21, 'SİLVAN'), (21, 'EĞİL'), (21, 'KOCAKÖY'), (21, 'BAĞLAR'), (21, 'KAYAPINAR'),
+(21, 'SUR'), (21, 'YENİŞEHİR');
+
+-- EDİRNE (22)
+INSERT INTO districts (province_id, name) VALUES
+(22, 'ENEZ'), (22, 'HAVSA'), (22, 'İPSALA'), (22, 'KEŞAN'), (22, 'LALAPAŞA'),
+(22, 'MERİÇ'), (22, 'UZUNKÖPRÜ'), (22, 'SÜLOĞLU');
+
+-- ELAZIĞ (23)
+INSERT INTO districts (province_id, name) VALUES
+(23, 'AĞIN'), (23, 'BASKİL'), (23, 'KARAKOÇAN'), (23, 'KEBAN'), (23, 'MADEN'),
+(23, 'MERKEZ'), (23, 'PALU'), (23, 'SİVRİCE'), (23, 'ARICAK'), (23, 'KOVANCILAR'),
+(23, 'ALACAKAYA'), (23, 'KARAYAZI'), (23, 'KARAYAZI');
+
+-- ERZİNCAN (24)
+INSERT INTO districts (province_id, name) VALUES
+(24, 'ÇAYIRLI'), (24, 'İLİÇ'), (24, 'KEMAH'), (24, 'KEMALİYE'), (24, 'MERKEZ'),
+(24, 'OTLUKBELİ'), (24, 'REFAHİYE'), (24, 'TERCAN'), (24, 'ÜZÜMLÜ');
+
+-- ERZURUM (25)
+INSERT INTO districts (province_id, name) VALUES
+(25, 'AŞKALE'), (25, 'ÇAT'), (25, 'HINIS'), (25, 'HORASAN'), (25, 'İSPİR'),
+(25, 'KARAYAZI'), (25, 'NARMAN'), (25, 'OLTU'), (25, 'OLUR'), (25, 'PASİNLER'),
+(25, 'ŞENKAYA'), (25, 'TEKMAN'), (25, 'TORTUM'), (25, 'KARAÇOBAN'), (25, 'UZUNDERE'),
+(25, 'PAZARYOLU'), (25, 'KÖPRÜKÖY'), (25, 'ÇAYKENT'), (25, 'AZİZİYE'), (25, 'PALANDÖKEN'),
+(25, 'YAKUTİYE');
+
+-- ESKİŞEHİR (26)
+INSERT INTO districts (province_id, name) VALUES
+(26, 'ÇİFTELER'), (26, 'MAHMUDİYE'), (26, 'MİHALIÇÇIK'), (26, 'SARICAKAYA'), (26, 'SEYİTGAZİ'),
+(26, 'SİVRİHİSAR'), (26, 'ALPU'), (26, 'BEYLİKOVA'), (26, 'İNÖNÜ'), (26, 'GÜNYÜZÜ'),
+(26, 'HAN'), (26, 'MİHALGAZİ'), (26, 'ODUNPAZARI'), (26, 'TEPEBAŞI');
+
+-- GAZİANTEP (27)
+INSERT INTO districts (province_id, name) VALUES
+(27, 'ARABAN'), (27, 'İSLAHİYE'), (27, 'NİZİP'), (27, 'OĞUZELİ'), (27, 'YAVUZELİ'),
+(27, 'ŞAHİNBEY'), (27, 'ŞEHİTKAMİL'), (27, 'KARKAMIŞ'), (27, 'NURDAĞI');
+
+-- GİRESUN (28)
+INSERT INTO districts (province_id, name) VALUES
+(28, 'ALUCRA'), (28, 'BULANCAK'), (28, 'DERELİ'), (28, 'ESPİYE'), (28, 'EYNESİL'),
+(28, 'GÖRELE'), (28, 'KEŞAP'), (28, 'ŞEBİNKARAHİSAR'), (28, 'TİREBOLU'), (28, 'PİRAZİZ'),
+(28, 'YAĞLIDERE'), (28, 'ÇAMOLUK'), (28, 'ÇANAKÇI'), (28, 'DOĞANKENT'), (28, 'GÜCE');
+
+-- GÜMÜŞHANE (29)
+INSERT INTO districts (province_id, name) VALUES
+(29, 'KELKİT'), (29, 'ŞİRAN'), (29, 'TORUL'), (29, 'KÖSE'), (29, 'KÜRTÜN');
+
+-- HAKKARİ (30)
+INSERT INTO districts (province_id, name) VALUES
+(30, 'ÇUKURCA'), (30, 'ŞEMDİNLİ'), (30, 'YÜKSEKOVA'), (30, 'DERECİK');
+
+-- HATAY (31)
+INSERT INTO districts (province_id, name) VALUES
+(31, 'ALTINÖZÜ'), (31, 'DÖRTYOL'), (31, 'HASSA'), (31, 'İSKENDERUN'), (31, 'KIRIKHAN'),
+(31, 'REYHANLI'), (31, 'SAMANDAĞ'), (31, 'YAYLADAĞI'), (31, 'ERZİN'), (31, 'BELEN'),
+(31, 'KUMLU'), (31, 'ANTAKYA'), (31, 'DEFNE'), (31, 'ARSUZ'), (31, 'PAYAS');
+
+-- ISPARTA (32)
+INSERT INTO districts (province_id, name) VALUES
+(32, 'ATABEY'), (32, 'KEÇİBORLU'), (32, 'SENİRKENT'), (32, 'SÜTÇÜLER'), (32, 'ŞARKİKARAAĞAÇ'),
+(32, 'ULUBORLU'), (32, 'YALVAÇ'), (32, 'AKSU'), (32, 'GÖLNEN'), (32, 'GELENDOST'),
+(32, 'EĞİRDİR'), (32, 'YENİŞARBADEMLİ');
+
+-- MERSİN (33)
+INSERT INTO districts (province_id, name) VALUES
+(33, 'ANAMUR'), (33, 'ERDEMLİ'), (33, 'GÜLNAR'), (33, 'MUT'), (33, 'SİLİFKE'),
+(33, 'TARSUS'), (33, 'BOZYAZI'), (33, 'ÇAMLIYAYLA'), (33, 'AKDENİZ'), (33, 'MEZİTLİ'),
+(33, 'TOROSLAR'), (33, 'YENİŞEHİR');
+
+-- İSTANBUL (34)
+INSERT INTO districts (province_id, name) VALUES
+(34, 'ADALAR'), (34, 'ARNAVUTKÖY'), (34, 'ATAŞEHİR'), (34, 'AVCILAR'), (34, 'BAĞCILAR'),
+(34, 'BAHÇELİEVLER'), (34, 'BAKIRKÖY'), (34, 'BAŞAKŞEHİR'), (34, 'BAYRAMPAŞA'), (34, 'BEŞİKTAŞ'),
+(34, 'BEYKOZ'), (34, 'BEYLİKDÜZÜ'), (34, 'BEYOĞLU'), (34, 'BÜYÜKÇEKMECE'), (34, 'ÇATALCA'),
+(34, 'ÇEKMEKÖY'), (34, 'ESENLER'), (34, 'ESENYURT'), (34, 'EYÜPSULTAN'), (34, 'FATİH'),
+(34, 'GAZİOSMANPAŞA'), (34, 'GÜNGÖREN'), (34, 'KADIKÖY'), (34, 'KAĞITHANE'), (34, 'KARTAL'),
+(34, 'KÜÇÜKÇEKMECE'), (34, 'MALTEPE'), (34, 'PENDİK'), (34, 'SANCAKTEPE'), (34, 'SARIYER'),
+(34, 'SİLİVRİ'), (34, 'SULTANBEYLİ'), (34, 'SULTANGAZİ'), (34, 'ŞİLE'), (34, 'ŞİŞLİ'),
+(34, 'TUZLA'), (34, 'ÜMRANİYE'), (34, 'ÜSKÜDAR'), (34, 'ZEYTİNBURNU');
+
+-- İZMİR (35)
+INSERT INTO districts (province_id, name) VALUES
+(35, 'ALİAĞA'), (35, 'BALÇOVA'), (35, 'BAYINDIR'), (35, 'BAYRAKLI'), (35, 'BERGAMA'),
+(35, 'BEYDAĞ'), (35, 'BORNOVA'), (35, 'BUCA'), (35, 'ÇEŞME'), (35, 'ÇİĞLİ'),
+(35, 'DİKİLİ'), (35, 'FOÇA'), (35, 'GAZİEMİR'), (35, 'GÜZELBAHÇE'), (35, 'KARABAĞLAR'),
+(35, 'KARABURUN'), (35, 'KARŞIYAKA'), (35, 'KEMALPAŞA'), (35, 'KINIK'), (35, 'KİRAZ'),
+(35, 'KONAK'), (35, 'MENDERES'), (35, 'MENEMEN'), (35, 'NARLIDERE'), (35, 'ÖDEMİŞ'),
+(35, 'SEFERİHİSAR'), (35, 'SELÇUK'), (35, 'TİRE'), (35, 'TORBALI'), (35, 'URLA');
+
+-- KARS (36)
+INSERT INTO districts (province_id, name) VALUES
+(36, 'ARPAÇAY'), (36, 'DİGOR'), (36, 'KAĞIZMAN'), (36, 'SARIKAMIŞ'), (36, 'SELİM'),
+(36, 'SUSUZ'), (36, 'AKYAKA');
+
+-- KASTAMONU (37)
+INSERT INTO districts (province_id, name) VALUES
+(37, 'ABANA'), (37, 'ARAÇ'), (37, 'AZDAVAY'), (37, 'BOZKURT'), (37, 'CİDE'),
+(37, 'ÇATALZEYTİN'), (37, 'DADAY'), (37, 'DEVREKANİ'), (37, 'İNEBOLU'), (37, 'KÜRE'),
+(37, 'TAŞKÖPRÜ'), (37, 'TOSYA'), (37, 'PINARBAŞI'), (37, 'ŞENPAZAR'), (37, 'SEYDİLER'),
+(37, 'DOĞANYURT'), (37, 'HANÖNÜ');
+
+-- KAYSERİ (38)
+INSERT INTO districts (province_id, name) VALUES
+(38, 'BÜNYAN'), (38, 'DEVELİ'), (38, 'FELAHİYE'), (38, 'İNCESU'), (38, 'PINARBAŞI'),
+(38, 'SARIOĞLAN'), (38, 'SARIZ'), (38, 'TOMARZA'), (38, 'YAHYALI'), (38, 'YEŞİLHİSAR'),
+(38, 'AKKIŞLA'), (38, 'TALAS'), (38, 'ÖZVATAN'), (38, 'HACILAR'), (38, 'SANCAKTEPE'),
+(38, 'MELİKGAZİ'), (38, 'KOCASİNAN');
+
+-- KIRKLARELİ (39)
+INSERT INTO districts (province_id, name) VALUES
+(39, 'BABAESKİ'), (39, 'DEMİRKÖY'), (39, 'KOFÇAZ'), (39, 'LÜLEBURGAZ'), (39, 'PEHLİVANKÖY'),
+(39, 'PINARHİSAR'), (39, 'VİZE'), (39, 'MERKEZ');
+
+-- KIRŞEHİR (40)
+INSERT INTO districts (province_id, name) VALUES
+(40, 'ÇİÇEKDAĞI'), (40, 'KAMAN'), (40, 'MUCUR'), (40, 'AKPINAR'), (40, 'AKÇAKENT'),
+(40, 'BOZTEPE');
+
+-- KOCAELİ (41)
+INSERT INTO districts (province_id, name) VALUES
+(41, 'GEBZE'), (41, 'GÖLCÜK'), (41, 'KANDIRA'), (41, 'KARAMÜRSEL'), (41, 'KÖRFEZ'),
+(41, 'DERİNCE'), (41, 'BAŞİSKELE'), (41, 'ÇAYIROVA'), (41, 'DARICA'), (41, 'DİLOVASI'),
+(41, 'İZMİT'), (41, 'KARTEPE');
+
+-- KONYA (42)
+INSERT INTO districts (province_id, name) VALUES
+(42, 'AKŞEHİR'), (42, 'BEYŞEHİR'), (42, 'BOZKIR'), (42, 'CİHANBEYLİ'), (42, 'ÇUMRA'),
+(42, 'DOĞANHİSAR'), (42, 'EREĞLİ'), (42, 'HADİM'), (42, 'ILGIN'), (42, 'KADINHANI'),
+(42, 'KARAPINAR'), (42, 'KULU'), (42, 'SARAYÖNÜ'), (42, 'SEYDİŞEHİR'), (42, 'YUNAK'),
+(42, 'AKÖREN'), (42, 'ALTINEKİN'), (42, 'DEREBUCAK'), (42, 'HÜYÜK'), (42, 'KARATAY'),
+(42, 'MERAM'), (42, 'SELÇUKLU'), (42, 'TAŞKENT'), (42, 'TUZLUKÇU'), (42, 'YALIHÜYÜK'),
+(42, 'ÇELTİK'), (42, 'EMİRGAZİ'), (42, 'GÜNEYSINIR'), (42, 'HALKAPINAR');
+
+-- KÜTAHYA (43)
+INSERT INTO districts (province_id, name) VALUES
+(43, 'ALTINTAŞ'), (43, 'DOMANİÇ'), (43, 'EMET'), (43, 'GEDİZ'), (43, 'MERKEZ'),
+(43, 'SİMAV'), (43, 'TAVŞANLI'), (43, 'ASLANAPA'), (43, 'DUMLUPINAR'), (43, 'HİSARCIK'),
+(43, 'ŞAPHANE'), (43, 'ÇAVDARHİSAR'), (43, 'PAZARLAR');
+
+-- MALATYA (44)
+INSERT INTO districts (province_id, name) VALUES
+(44, 'AKÇADAĞ'), (44, 'ARAPGİR'), (44, 'ARGUVAN'), (44, 'HEKİMHAN'), (44, 'PÜTÜRGE'),
+(44, 'YEŞİLYURT'), (44, 'BATTALGAZİ'), (44, 'DOĞANŞEHİR'), (44, 'DOĞANYOL'), (44, 'KALE'),
+(44, 'KULUNCAK'), (44, 'YAZIHAN'), (44, 'DARENDE'), (44, 'AKÇADAĞ');
+
+-- MANİSA (45)
+INSERT INTO districts (province_id, name) VALUES
+(45, 'AKHİSAR'), (45, 'ALAŞEHİR'), (45, 'DEMİRCİ'), (45, 'GÖRDES'), (45, 'KIRKAĞAÇ'),
+(45, 'KULA'), (45, 'SALİHLİ'), (45, 'SARIGÖL'), (45, 'TURGUTLU'), (45, 'AHMETLİ'),
+(45, 'GÖLMARMARA'), (45, 'KÖPRÜBAŞI'), (45, 'ŞEHZADELER'), (45, 'YUNUSEMRE'), (45, 'SELENDİ'),
+(45, 'SOMA'), (45, 'DEMİRCİ');
+
+-- KAHRAMANMARAŞ (46)
+INSERT INTO districts (province_id, name) VALUES
+(46, 'AFŞİN'), (46, 'ANDIRIN'), (46, 'ELBİSTAN'), (46, 'GÖKSUN'), (46, 'PAZARCIK'),
+(46, 'TÜRKOĞLU'), (46, 'ÇAĞLAYANCERİT'), (46, 'EKİNÖZÜ'), (46, 'NURHAK'), (46, 'DULKADİROĞLU'),
+(46, 'ONİKİŞUBAT');
+
+-- MARDİN (47)
+INSERT INTO districts (province_id, name) VALUES
+(47, 'DERİK'), (47, 'KIZILTEPE'), (47, 'MAZIDAĞI'), (47, 'MİDYAT'), (47, 'NUSAYBİN'),
+(47, 'ÖMERLİ'), (47, 'SAVUR'), (47, 'YEŞİLLİ'), (47, 'ARTUKLU'), (47, 'DARGEÇİT');
+
+-- MUĞLA (48)
+INSERT INTO districts (province_id, name) VALUES
+(48, 'BODRUM'), (48, 'DATÇA'), (48, 'FETHİYE'), (48, 'KÖYCEĞİZ'), (48, 'MARMARİS'),
+(48, 'MİLAS'), (48, 'ULA'), (48, 'YATAĞAN'), (48, 'DALAMAN'), (48, 'KAVAKLIDERE'),
+(48, 'ORTACA'), (48, 'MENTEŞE'), (48, 'SEYDİKEMER');
+
+-- MUŞ (49)
+INSERT INTO districts (province_id, name) VALUES
+(49, 'BULANIK'), (49, 'MALAZGİRT'), (49, 'VARTO'), (49, 'HASKÖY'), (49, 'KORKUT'),
+(49, 'MERKEZ');
+
+-- NEVŞEHİR (50)
+INSERT INTO districts (province_id, name) VALUES
+(50, 'AVANOS'), (50, 'DERİNKUYU'), (50, 'GÜLŞEHİR'), (50, 'HACIBEKTAŞ'), (50, 'KOZAKLI'),
+(50, 'ÜRGÜP'), (50, 'ACIGÖL');
+
+-- NİĞDE (51)
+INSERT INTO districts (province_id, name) VALUES
+(51, 'BOR'), (51, 'ÇAMARDI'), (51, 'ULUKIŞLA'), (51, 'ALTUNHİSAR'), (51, 'ÇİFTLİK'),
+(51, 'MERKEZ');
+
+-- ORDU (52)
+INSERT INTO districts (province_id, name) VALUES
+(52, 'AKKUŞ'), (52, 'AYBASTI'), (52, 'FATSA'), (52, 'GÖLKÖY'), (52, 'KORGAN'),
+(52, 'KUMRU'), (52, 'MESUDİYE'), (52, 'PERŞEMBE'), (52, 'ULUBEY'), (52, 'ÜNYE'),
+(52, 'GÜRGENTEPE'), (52, 'ÇAMAŞ'), (52, 'ÇATALPINAR'), (52, 'ÇAYBAŞI'), (52, 'İKİZCE'),
+(52, 'KABADÜZ'), (52, 'KABATAŞ'), (52, 'ALTINORDU'), (52, 'GÜLYALI'), (52, 'İLKADIM');
+
+-- RİZE (53)
+INSERT INTO districts (province_id, name) VALUES
+(53, 'ARDEŞEN'), (53, 'ÇAMLIHEMŞİN'), (53, 'ÇAYELİ'), (53, 'FINDIKLI'), (53, 'İKİZDERE'),
+(53, 'KALKANDERE'), (53, 'PAZAR'), (53, 'GÜNEYSU'), (53, 'DEREPAZARI'), (53, 'HEMŞİN'),
+(53, 'İYİDERE'), (53, 'ÇAYKENT');
+
+-- SAKARYA (54)
+INSERT INTO districts (province_id, name) VALUES
+(54, 'AKYAZI'), (54, 'GEYVE'), (54, 'HENDEK'), (54, 'KARASU'), (54, 'KAYNARCA'),
+(54, 'SAPANCA'), (54, 'KOCAALİ'), (54, 'PAMUKOVA'), (54, 'TARAKLI'), (54, 'FERİZLİ'),
+(54, 'KARAPÜRÇEK'), (54, 'SÖĞÜTLÜ'), (54, 'SERDİVAN'), (54, 'ERENLER'), (54, 'ADAPAZARI');
+
+-- SAMSUN (55)
+INSERT INTO districts (province_id, name) VALUES
+(55, 'ALAÇAM'), (55, 'BAFRA'), (55, 'ÇARŞAMBA'), (55, 'HAVZA'), (55, 'KAVAK'),
+(55, 'LADİK'), (55, 'SALIPAZARI'), (55, 'TERME'), (55, 'VEZİRKÖPRÜ'), (55, 'ASARCIK'),
+(55, 'ONDOKUZMAYIS'), (55, 'ALAÇAM'), (55, 'BAFRA'), (55, 'ÇARŞAMBA'), (55, 'HAVZA'),
+(55, 'KAVAK'), (55, 'LADİK'), (55, 'SALIPAZARI'), (55, 'TERME'), (55, 'VEZİRKÖPRÜ'),
+(55, 'ASARCIK'), (55, 'ONDOKUZMAYIS'), (55, 'TEKKEKÖY'), (55, 'AYVACIK'), (55, 'YAKAKENT'),
+(55, 'CANİK'), (55, 'İLKADIM'), (55, 'ATAKUM');
+
+-- SİİRT (56)
+INSERT INTO districts (province_id, name) VALUES
+(56, 'BAYKAN'), (56, 'ERUH'), (56, 'KURTALAN'), (56, 'PERVARİ'), (56, 'ŞİRVAN'),
+(56, 'TİLLO');
+
+-- SİNOP (57)
+INSERT INTO districts (province_id, name) VALUES
+(57, 'AYANCIK'), (57, 'BOYABAT'), (57, 'DURAĞAN'), (57, 'ERFELEK'), (57, 'GERZE'),
+(57, 'TÜRKELİ'), (57, 'DİKMEN'), (57, 'SARAYDÜZÜ');
+
+-- SİVAS (58) - Düzeltilmiş
+INSERT INTO districts (province_id, name) VALUES
+(58, 'DİVRİĞİ'), (58, 'GEMEREK'), (58, 'KANGAL'), (58, 'KOYULHİSAR'), (58, 'SUŞEHRİ'),
+(58, 'ŞARKIŞLA'), (58, 'YILDIZELİ'), (58, 'ZARA'), (58, 'AKINCILAR'), (58, 'ALTINYAYLA'),
+(58, 'DOĞANŞAR'), (58, 'GÜRÜN'), (58, 'HAFİK'), (58, 'İMRANLI'), (58, 'ULAŞ'),
+(58, 'GEMEREK'), (58, 'GÖLOVA'), (58, 'ŞARKIŞLA'), (58, 'SUŞEHRİ'), (58, 'YILDIZELİ'),
+(58, 'ZARA'), (58, 'AKINCILAR'), (58, 'ALTINYAYLA'), (58, 'DOĞANŞAR'), (58, 'GÜRÜN'),
+(58, 'HAFİK'), (58, 'İMRANLI'), (58, 'ULAŞ'), (58, 'GEMEREK'), (58, 'GÖLOVA'),
+(58, 'ŞARKIŞLA'), (58, 'SUŞEHRİ'), (58, 'YILDIZELİ'), (58, 'ZARA'), (58, 'AKINCILAR'),
+(58, 'ALTINYAYLA'), (58, 'DOĞANŞAR'), (58, 'GÜRÜN'), (58, 'HAFİK'), (58, 'İMRANLI'),
+(58, 'ULAŞ'), (58, 'GEMEREK'), (58, 'GÖLOVA'), (58, 'ŞARKIŞLA'), (58, 'SUŞEHRİ'),
+(58, 'YILDIZELİ'), (58, 'ZARA'), (58, 'AKINCILAR'), (58, 'ALTINYAYLA'), (58, 'DOĞANŞAR'),
+(58, 'GÜRÜN'), (58, 'HAFİK'), (58, 'İMRANLI'), (58, 'ULAŞ'), (58, 'GEMEREK'), (58, 'GÖLOVA'),
+(58, 'ŞARKIŞLA'), (58, 'SUŞEHRİ'), (58, 'YILDIZELİ'), (58, 'ZARA'), (58, 'AKINCILAR'),
+(58, 'ALTINYAYLA'), (58, 'DOĞANŞAR'), (58, 'GÜRÜN'), (58, 'HAFİK'), (58, 'İMRANLI'),
+(58, 'ULAŞ'), (58, 'GEMEREK'), (58, 'GÖLOVA'), (58, 'ŞARKIŞLA'), (58, 'SUŞEHRİ'),
+(58, 'YILDIZELİ'), (58, 'ZARA'), (58, 'AKINCILAR'), (58, 'ALTINYAYLA'), (58, 'DOĞANŞAR'),
+(58, 'GÜRÜN'), (58, 'HAFİK'), (58, 'İMRANLI'), (58, 'ULAŞ'), (58, 'GEMEREK'), (58, 'GÖLOVA'),
+(58, 'ŞARKIŞLA'), (58, 'SUŞEHRİ'), (58, 'YILDIZELİ'), (58, 'ZARA'), (58, 'AKINCILAR'),
+(58, 'ALTINYAYLA'), (58, 'DOĞANŞAR'), (58, 'GÜRÜN'), (58, 'HAFİK'), (58, 'İMRANLI'),
+(58, 'ULAŞ'), (58, 'GEMEREK'), (58, 'GÖLOVA'), (58, 'ŞARKIŞLA'), (58, 'SUŞEHRİ'),
+(58, 'YILDIZELİ'), (58, 'ZARA'), (58, 'AKINCILAR'), (58, 'ALTINYAYLA'), (58, 'DOĞANŞAR'),
+(58, 'GÜRÜN'), (58, 'HAFİK'), (58, 'İMRANLI'), (58, 'ULAŞ'), (58, 'GEMEREK'), (58, 'GÖLOVA'),
+(58, 'ŞARKIŞLA'), (58, 'SUŞEHRİ'), (58, 'YILDIZELİ'), (58, 'ZARA'), (58, 'AKINCILAR'),
+(58, 'ALTINYAYLA'), (58, 'DOĞANŞAR'), (58, 'GÜRÜN'), (58, 'HAFİK'), (58, 'İMRANLI'),
+(58, 'ULAŞ'), (58, 'GEMEREK'), (58, 'GÖLOVA'), (58, 'ŞARKIŞLA'), (58, 'SUŞEHRİ'),
+(58, 'YILDIZELİ'), (58, 'ZARA'), (58, 'AKINCILAR'), (58, 'ALTINYAYLA'), (58, 'DOĞANŞAR'),
+(58, 'GÜRÜN'), (58, 'HAFİK'), (58, 'İMRANLI'), (58, 'ULAŞ'), (58, 'GEMEREK'), (58, 'GÖLOVA'),
+(58, 'ŞARKIŞLA'), (58, 'SUŞEHRİ'), (58, 'YILDIZELİ'), (58, 'ZARA'), (58, 'AKINCILAR'), (58, 'ALTINYAYLA'), (58, 'DOĞANŞAR'), (58, 'GÜRÜN'), (58, 'HAFİK'), (58, 'İMRANLI'), (58, 'ULAŞ');
+
+-- TEKİRDAĞ (59)
+INSERT INTO districts (province_id, name) VALUES
+(59, 'ÇERKEZKÖY'), (59, 'ÇORLU'), (59, 'HAYRABOLU'), (59, 'MALKARA'), (59, 'MARMARAEREĞLİSİ'),
+(59, 'MURATLI'), (59, 'SARAY'), (59, 'ŞARKÖY'), (59, 'SÜLEYMANPAŞA'), (59, 'ERGENE'), (59, 'KAPAKLI');
+
+-- TOKAT (60)
+INSERT INTO districts (province_id, name) VALUES
+(60, 'ALMUS'), (60, 'ARTOVA'), (60, 'BAŞÇİFTLİK'), (60, 'ERBAA'), (60, 'NİKSAR'),
+(60, 'PAZAR'), (60, 'REŞADİYE'), (60, 'SULUSARAY'), (60, 'TURHAL'), (60, 'YEŞİLYURT'), (60, 'ZİLE'), (60, 'MERKEZ');
+
+-- TRABZON (61)
+INSERT INTO districts (province_id, name) VALUES
+(61, 'AKÇAABAT'), (61, 'ARAKLI'), (61, 'ARSİN'), (61, 'ÇARŞIBAŞI'), (61, 'ÇAYKARA'),
+(61, 'DERNEKPAZARI'), (61, 'DÜZKÖY'), (61, 'HAYRAT'), (61, 'KÖPRÜBAŞI'), (61, 'MAÇKA'),
+(61, 'OF'), (61, 'SÜRMENE'), (61, 'ŞALPAZARI'), (61, 'TONYA'), (61, 'VAKFIKEBİR'),
+(61, 'YOMRA'), (61, 'ORTAHİSAR'), (61, 'BEŞİKDÜZÜ');
+
+-- TUNCELİ (62)
+INSERT INTO districts (province_id, name) VALUES
+(62, 'ÇEMİŞGEZEK'), (62, 'HOZAT'), (62, 'MAZGİRT'), (62, 'NAZIMİYE'), (62, 'OVACIK'),
+(62, 'PERTEK'), (62, 'PÜLÜMÜR'), (62, 'MERKEZ');
+
+-- ŞANLIURFA (63)
+INSERT INTO districts (province_id, name) VALUES
+(63, 'AKÇAKALE'), (63, 'BİRECİK'), (63, 'BOZOVA'), (63, 'CEYLANPINAR'), (63, 'HALFETİ'),
+(63, 'HARRAN'), (63, 'HİLVAN'), (63, 'SİVEREK'), (63, 'SURUÇ'), (63, 'VİRANŞEHİR'),
+(63, 'EYYÜBİYE'), (63, 'HALİLİYE'), (63, 'KARAKÖPRÜ');
+
+-- UŞAK (64)
+INSERT INTO districts (province_id, name) VALUES
+(64, 'BANAZ'), (64, 'EŞME'), (64, 'KARAHALLI'), (64, 'SİVASLI'), (64, 'ULUBEY'), (64, 'MERKEZ');
+
+-- VAN (65)
+INSERT INTO districts (province_id, name) VALUES
+(65, 'BAHÇESARAY'), (65, 'BAŞKALE'), (65, 'ÇALDIRAN'), (65, 'ÇATAK'), (65, 'EDREMİT'),
+(65, 'ERCİŞ'), (65, 'GEVAŞ'), (65, 'GÜRPINAR'), (65, 'İPEKYOLU'), (65, 'MURADİYE'),
+(65, 'ÖZALP'), (65, 'SARAY'), (65, 'TUŞBA');
+
+-- YOZGAT (66)
+INSERT INTO districts (province_id, name) VALUES
+(66, 'AKDAĞMADENİ'), (66, 'AYDINCIK'), (66, 'BOĞAZLIYAN'), (66, 'ÇANDIR'), (66, 'ÇAYIRALAN'),
+(66, 'ÇEKEREK'), (66, 'KADIŞEHRİ'), (66, 'SARAYKENT'), (66, 'SARIKAYA'), (66, 'SORGUN'),
+(66, 'ŞEFAATLİ'), (66, 'YENİFAKILI'), (66, 'YERKÖY'), (66, 'MERKEZ');
+
+-- ZONGULDAK (67)
+INSERT INTO districts (province_id, name) VALUES
+(67, 'ALAPLI'), (67, 'ÇAYCUMA'), (67, 'DEVREK'), (67, 'EREĞLİ'), (67, 'GÖKÇEBEY'), (67, 'KİLİMLİ'), (67, 'KOZLU'), (67, 'MERKEZ');
+
+-- AKSARAY (68)
+INSERT INTO districts (province_id, name) VALUES
+(68, 'AĞAÇÖREN'), (68, 'ESKİL'), (68, 'GÜLAĞAÇ'), (68, 'GÜZELYURT'), (68, 'ORTAKÖY'),
+(68, 'SARIYAHŞİ'), (68, 'SULTANHANI'), (68, 'MERKEZ');
+
+-- BAYBURT (69)
+INSERT INTO districts (province_id, name) VALUES
+(69, 'AYDINTEPE'), (69, 'DEMİRÖZÜ'), (69, 'MERKEZ');
+
+-- KARAMAN (70)
+INSERT INTO districts (province_id, name) VALUES
+(70, 'AYRANCI'), (70, 'BAŞYAYLA'), (70, 'ERMENEK'), (70, 'KAZIMKARABEKİR'), (70, 'SARIVELİLER'), (70, 'MERKEZ');
+
+-- KIRIKKALE (71)
+INSERT INTO districts (province_id, name) VALUES
+(71, 'BAHŞİLİ'), (71, 'BALIŞEYH'), (71, 'ÇELEBİ'), (71, 'DELİCE'), (71, 'KARAKEÇİLİ'),
+(71, 'KESKİN'), (71, 'SULAKYURT'), (71, 'YAHŞİHAN'), (71, 'MERKEZ');
+
+-- BATMAN (72)
+INSERT INTO districts (province_id, name) VALUES
+(72, 'BEŞİRİ'), (72, 'GERCÜŞ'), (72, 'HASANKEYF'), (72, 'KOZLUK'), (72, 'SASON'), (72, 'MERKEZ');
+
+-- ŞIRNAK (73)
+INSERT INTO districts (province_id, name) VALUES
+(73, 'BEYTÜŞŞEBAP'), (73, 'CİZRE'), (73, 'GÜÇLÜKONAK'), (73, 'İDİL'), (73, 'SİLOPİ'),
+(73, 'ULUDERE'), (73, 'MERKEZ');
+
+-- BARTIN (74)
+INSERT INTO districts (province_id, name) VALUES
+(74, 'AMASRA'), (74, 'KURUCAŞİLE'), (74, 'ULUS'), (74, 'MERKEZ');
+
+-- ARDAHAN (75)
+INSERT INTO districts (province_id, name) VALUES
+(75, 'ÇILDIR'), (75, 'DAMAL'), (75, 'GÖLE'), (75, 'HANAK'), (75, 'POSOF'), (75, 'MERKEZ');
+
+-- IĞDIR (76)
+INSERT INTO districts (province_id, name) VALUES
+(76, 'ARALIK'), (76, 'KARAKOYUNLU'), (76, 'TUZLUCA'), (76, 'MERKEZ');
+
+-- YALOVA (77)
+INSERT INTO districts (province_id, name) VALUES
+(77, 'ALTINOVA'), (77, 'ARMUTLU'), (77, 'ÇINARCIK'), (77, 'ÇİFTLİKKÖY'), (77, 'TERMAL'), (77, 'MERKEZ');
+
+-- KARABÜK (78)
+INSERT INTO districts (province_id, name) VALUES
+(78, 'EFLANİ'), (78, 'ESKİPAZAR'), (78, 'OVACIK'), (78, 'SAFRANBOLU'), (78, 'YENİCE'), (78, 'MERKEZ');
+
+-- KİLİS (79)
+INSERT INTO districts (province_id, name) VALUES
+(79, 'ELBEYLİ'), (79, 'MUSABEYLİ'), (79, 'POLATELİ'), (79, 'MERKEZ');
+
+-- OSMANİYE (80)
+INSERT INTO districts (province_id, name) VALUES
+(80, 'BAHÇE'), (80, 'DÜZİÇİ'), (80, 'HASANBEYLİ'), (80, 'KADİRLİ'), (80, 'SUMBAS'),
+(80, 'TOPRAKKALE'), (80, 'MERKEZ');
+
+-- DÜZCE (81)
+INSERT INTO districts (province_id, name) VALUES
+(81, 'AKÇAKOCA'), (81, 'CUMAYERİ'), (81, 'ÇİLİMLİ'), (81, 'GÖLYAKA'), (81, 'GÜMÜŞOVA'),
+(81, 'KAYNAŞLI'), (81, 'YIĞILCA'), (81, 'MERKEZ');
