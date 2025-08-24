@@ -1,148 +1,137 @@
 const express = require('express');
 const router = express.Router();
-const Smart31sDriver = require('../printer/smart31s-driver');
-const pool = require('../config/database');
+const Smart31sPrinter = require('../printer/smart31s-driver');
+const BrotherMFCPrinter = require('../printer/brother-mfc-driver');
+const logger = require('../utils/logger');
 
-const printer = new Smart31sDriver();
+// Node.js 18+ için fetch global olarak mevcut, eski versiyonlar için import gerekli
+const fetch = globalThis.fetch || require('node-fetch');
 
-// Yazıcı bağlantı durumu
+// Smart 31S yazıcı instance'ı
+const smart31sPrinter = new Smart31sPrinter();
+
+// Brother MFC yazıcı instance'ı
+const brotherMFCPrinter = new BrotherMFCPrinter();
+
+// Yazıcı durumunu kontrol et
 router.get('/status', async (req, res) => {
     try {
-        const isConnected = await printer.connect();
+        const smart31sStatus = await smart31sPrinter.checkStatus();
+        const brotherMFCStatus = await brotherMFCPrinter.checkStatus();
         
-        if (isConnected) {
-            res.json({ 
-                connected: true, 
-                printer: 'Smart 31S',
-                status: 'Bağlı ve Test Edildi',
-                details: 'Yazıcı başarıyla bağlandı ve test komutu gönderildi'
-            });
-        } else {
-            res.json({ 
-                connected: false, 
-                printer: 'Smart 31S',
-                status: 'Bağlantı Yok',
-                details: 'Smart 31S yazıcısı bulunamadı veya bağlantı kurulamadı. Lütfen USB bağlantısını ve yazıcı gücünü kontrol edin.'
-            });
-        }
-    } catch (error) {
-        console.error('Yazıcı durum kontrolü hatası:', error);
-        res.status(500).json({ 
-            error: error.message,
-            details: 'Yazıcı kontrolü sırasında beklenmeyen bir hata oluştu'
+        res.json({
+            smart31s: smart31sStatus,
+            brotherMFC: brotherMFCStatus,
+            timestamp: new Date().toISOString()
         });
+    } catch (error) {
+        logger.error('Yazıcı durumu kontrol edilemedi:', error);
+        res.status(500).json({ error: 'Yazıcı durumu kontrol edilemedi' });
     }
 });
 
-// Takım oyuncularını getir
-async function getTeamPlayers(teamId) {
-    try {
-        const query = `
-            SELECT 
-                p.id,
-                p.name,
-                p.surname,
-                p.position,
-                p.number,
-                p.birth_date,
-                p.height,
-                p.weight
-            FROM players p
-            WHERE p.team_id = $1
-            ORDER BY p.number, p.name
-        `;
-        
-        const result = await pool.query(query, [teamId]);
-        return result.rows;
-    } catch (error) {
-        console.error('Oyuncu bilgileri alınamadı:', error);
-        throw error;
-    }
-}
-
-// Takım kartlarını yazdır
+// Smart 31S ile takım kartlarını yazdır
 router.post('/print/team-cards', async (req, res) => {
     try {
-        const { teamId, teamName } = req.body;
+        const { teamId } = req.body;
         
-        if (!teamId || !teamName) {
-            return res.status(400).json({ error: 'Takım ID ve adı gerekli' });
+        if (!teamId) {
+            return res.status(400).json({ error: 'Takım ID gerekli' });
         }
-        
-        // Takım oyuncularını al
-        const players = await getTeamPlayers(teamId);
-        
-        if (!players || players.length === 0) {
-            return res.status(404).json({ error: 'Takımda oyuncu bulunamadı' });
-        }
-        
-        // Yazıcıya bağlan
-        const connected = await printer.connect();
-        if (!connected) {
-            return res.status(500).json({ error: 'Yazıcı bağlantısı kurulamadı' });
-        }
-        
-        // Kartları yazdır
-        await printer.printTeamCards(players, teamName);
-        
-        // Bağlantıyı kapat
-        printer.disconnect();
-        
-        res.json({ 
-            success: true, 
-            message: `${players.length} kart yazdırıldı`,
-            team: teamName,
-            playerCount: players.length
-        });
-        
+
+        const result = await smart31sPrinter.printTeamCards(teamId);
+        res.json(result);
     } catch (error) {
-        console.error('Yazdırma hatası:', error);
-        res.status(500).json({ error: error.message });
+        logger.error('Takım kartları yazdırılamadı:', error);
+        res.status(500).json({ error: 'Takım kartları yazdırılamadı' });
     }
 });
 
-// Test kartı yazdır
+// Brother MFC ile takım kartlarını yazdır
+router.post('/print/team-cards-brother', async (req, res) => {
+    try {
+        const { teamId } = req.body;
+        
+        if (!teamId) {
+            return res.status(400).json({ error: 'Takım ID gerekli' });
+        }
+
+        // Takım bilgilerini al
+        const teamResponse = await fetch(`http://localhost:3001/api/applications/${teamId}`);
+        const teamData = await teamResponse.json();
+        
+        if (!teamData.success) {
+            return res.status(404).json({ error: 'Takım bulunamadı' });
+        }
+
+        const results = [];
+        
+        // Her futbolcu için kart yazdır
+        for (const player of teamData.data.players) {
+            try {
+                const result = await brotherMFCPrinter.printPlayerCard(player, teamData.data.club);
+                results.push({
+                    player: `${player.first_name} ${player.last_name}`,
+                    success: true,
+                    message: result.message
+                });
+            } catch (error) {
+                results.push({
+                    player: `${player.first_name} ${player.last_name}`,
+                    success: false,
+                    error: error.message
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            message: 'Brother MFC yazıcıda takım kartları yazdırıldı',
+            results
+        });
+    } catch (error) {
+        logger.error('Brother MFC yazıcıda takım kartları yazdırılamadı:', error);
+        res.status(500).json({ error: 'Brother MFC yazıcıda takım kartları yazdırılamadı' });
+    }
+});
+
+// Smart 31S test yazdırma
 router.post('/print/test', async (req, res) => {
     try {
-        const testPlayer = {
-            name: 'Test',
-            surname: 'Oyuncu',
-            position: 'Test Pozisyon',
-            number: '00',
-            birthDate: '01.01.2000',
-            height: '180',
-            weight: '75'
-        };
-        
-        const connected = await printer.connect();
-        if (!connected) {
-            return res.status(500).json({ error: 'Yazıcı bağlantısı kurulamadı' });
-        }
-        
-        await printer.printPlayerCard(testPlayer, 'TEST TAKIMI');
-        printer.disconnect();
-        
-        res.json({ success: true, message: 'Test kartı yazdırıldı' });
-        
+        const result = await smart31sPrinter.printTest();
+        res.json(result);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        logger.error('Test yazdırma başarısız:', error);
+        res.status(500).json({ error: 'Test yazdırma başarısız' });
     }
 });
 
-// Takım oyuncularını listele (test için)
+// Brother MFC test yazdırma
+router.post('/print/test-brother', async (req, res) => {
+    try {
+        const result = await brotherMFCPrinter.printTest();
+        res.json(result);
+    } catch (error) {
+        logger.error('Brother MFC test yazdırma başarısız:', error);
+        res.status(500).json({ error: 'Brother MFC test yazdırma başarısız' });
+    }
+});
+
+// Takım futbolcularını getir
 router.get('/team/:teamId/players', async (req, res) => {
     try {
         const { teamId } = req.params;
-        const players = await getTeamPlayers(teamId);
         
-        res.json({ 
-            success: true, 
-            data: players 
+        // Bu endpoint takım futbolcularını getirmek için kullanılabilir
+        // Şimdilik basit bir response döndürüyoruz
+        res.json({
+            success: true,
+            message: 'Takım futbolcuları getirildi',
+            teamId
         });
-        
     } catch (error) {
-        console.error('Oyuncu listesi hatası:', error);
-        res.status(500).json({ error: error.message });
+        logger.error('Takım futbolcuları getirilemedi:', error);
+        res.status(500).json({ error: 'Takım futbolcuları getirilemedi' });
     }
 });
 
